@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from functools import wraps
+from typing import Any, Callable
 import requests
 import os
 import structlog
@@ -31,21 +32,40 @@ class Dispatch:
 
 @dataclass
 class Config:
-    auth_token: str
-    device_id: str
+    octopus_api_key: str | None
+    device_id: str | None
     graphql_base_url: str
 
 
-class GraphQLClient:
-    def __init__(self, config: Config):
-        self.base_url = config.graphql_base_url
-        self.auth_token = config.auth_token
+def authentication_required(method: Callable):
+    @wraps(method)
+    def _impl(self, *args, **kwargs):
+        if not self.auth_token:
+            logger.error("Authentication required. No auth token found", auth_token=self.auth_token)
+            raise AuthenticationError("Authentication required. No auth token found")
+        return method(self, *args, **kwargs)
 
-    def get_query(self, query_str: str, variables: dict[str, Any]) -> requests.Response | None:
+    return _impl
+
+
+class OctopusGraphQLClient:
+    base_url: str
+    api_key: str
+    auth_token: str | None
+
+    def __init__(self, config: Config):
+        if not config.octopus_api_key:
+            raise ValueError("Octopus API key is required")
+        self.base_url = config.graphql_base_url
+        self.api_key = config.octopus_api_key
+        self.auth_token = None
+
+    def get_query(self, query_str: str, variables: dict[str, Any], auth_token: str | None = None) -> dict[str, Any]:
         headers = {
             "Content-Type": "application/json",
-            "Authorization": self.auth_token,
         }
+        if auth_token:
+            headers["Authorization"] = auth_token
         try:
             res = requests.post(
                 self.base_url,
@@ -79,6 +99,26 @@ class GraphQLClient:
             logger.exception()
             raise GraphQLError(f"HTTP error: {e.response.status_code}")
 
+    def authenticate(self):
+        query = """
+        mutation ObtainKrakenToken($input: ObtainJSONWebTokenInput!) {
+              obtainKrakenToken(input: $input) {
+                token
+                payload
+                refreshToken
+                refreshExpiresIn
+              }
+            }
+        """
+        variables = {"input": {"APIKey": self.api_key}}
+        data = self.get_query(query, variables)
+        auth_token = data.get("data", {}).get("obtainKrakenToken", {}).get("token", None)
+        if not auth_token:
+            logger.error("Failed to acquire auth token")
+            raise AuthenticationError("Failed to acquire auth token")
+        self.auth_token = auth_token
+
+    @authentication_required
     def query_dispatches(self, device_id: str) -> list[Dispatch]:
         query = """
         query FlexPlannedDispatches($deviceId: String!) {
@@ -93,14 +133,8 @@ class GraphQLClient:
         variables = {
             "deviceId": device_id,
         }
-        res = self.get_query(query, variables)
-        print(res.text)
-        if not res:
-            logger.error("No data found")
-            return []
-        data_json = res.json().get("data", {})
-        print(data_json)
-        dispatches_data = data_json.get("flexPlannedDispatches", [])
+        data = self.get_query(query, variables, self.auth_token)
+        dispatches_data = data.get("data", {}).get("flexPlannedDispatches", [])
         return [
             Dispatch(
                 start_datetime_utc=datetime.fromisoformat(dispatch.get("start")),
@@ -112,11 +146,18 @@ class GraphQLClient:
 
 def main():
     config = Config(
-        auth_token=os.environ.get("AUTH_TOKEN", ""),
-        device_id=os.environ.get("DEVICE_ID", ""),
+        octopus_api_key=os.environ.get("OCTOPUS_API_KEY"),
+        device_id=os.environ.get("DEVICE_ID"),
         graphql_base_url=os.environ.get("GRAPHQL_BASE_URL", "https://api.octopus.energy/v1/graphql/"),
     )
-    client = GraphQLClient(config=config)
+    if not config.octopus_api_key:
+        logger.error("OCTOPUS_API_KEY environment variable is required")
+        return
+    if not config.device_id:
+        logger.error("DEVICE_ID environment variable is required")
+        return
+    client = OctopusGraphQLClient(config=config)
+    client.authenticate()
     dispatches = client.query_dispatches(config.device_id)
     print(dispatches)
 
