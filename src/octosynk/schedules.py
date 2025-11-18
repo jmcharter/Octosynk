@@ -99,27 +99,32 @@ def pad_transitions(transitions: list[Transition]) -> list[Transition]:
 
 def new_base_schedule(config: Config) -> Schedule:
     # Schedules must start from no earlier than midnight, therefore if we have
-    # an off-peak range that spands two days, e.g 23:30 to 05:30 then we must
+    # an off-peak range that spans two days, e.g 23:30 to 05:30 then we must
     # start the schedule from midnight and start the final schedule from the
     # start of the first day up to midnight.
     # e.g
     # Slot 1 = 00:00 - 05:30
     # ...
     # Slot 6 = 23:30 - 00:00
-    # offpeak_start = config.off_peak_start_time
-    # offpeak_end = config.off_peak_end_time
-    # power_w = config.max_power_watts
-    # soc_min = config.soc_min
-    # soc_max = config.soc_max
 
-    # initial_start_time = (
-    #     time(MIDNIGHT) if config.off_peak_end_time > config.off_peak_start_time else config.off_peak_start_time
-    # )
-
-    # now = datetime.now()
-    # slot_1 = ScheduleLine(
-    #     from_datetime_utc=datetime.combine(now, initial_start_time),
-    #     power_watts=config.max_power_watts,
-    #     target_soc=100,
-    #     charge=True,
-    # )
+    transitions = off_peak_range_to_transitions(config.off_peak_start_time, config.off_peak_end_time)
+    schedule_lines = [
+        ScheduleLine(
+            today_at_utc(transition.time_utc),
+            config.max_power_watts,
+            target_soc=config.soc_max if transition.off_peak else config.soc_min,
+            charge=transition.off_peak,
+        )
+        for transition in transitions
+    ]
+    if len(schedule_lines) != 6:
+        logger.error("Incorrect number of schedule lines generated", schedule_lines_qty=len(schedule_lines))
+        raise ValueError("Incorrect number of schedule lines generated")
+    return Schedule(
+        slot_1=schedule_lines[0],
+        slot_2=schedule_lines[1],
+        slot_3=schedule_lines[2],
+        slot_4=schedule_lines[3],
+        slot_5=schedule_lines[4],
+        slot_6=schedule_lines[5],
+    )
