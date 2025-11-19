@@ -9,7 +9,7 @@ from octosynk import octopus
 logger = structlog.stdlib.get_logger(__name__)
 
 
-def run():
+def get_config() -> Config | None:
     octopus_api_key = os.environ.get("OCTOPUS_API_KEY")
     if not octopus_api_key:
         logger.error("OCTOPUS_API_KEY environment variable is required")
@@ -37,13 +37,19 @@ def run():
         logger.error("OFF_PEAK_END_TIME must be of format: hh:mm, e.g 14:00")
         return
 
-    config = Config(
+    return Config(
         octopus_api_key=octopus_api_key,
         device_id=device_id,
         graphql_base_url=os.environ.get("GRAPHQL_BASE_URL", "https://api.octopus.energy/v1/graphql/"),
         off_peak_start_time=off_peak_start_time,
         off_peak_end_time=off_peak_end_time,
     )
+
+
+def run():
+    config = get_config()
+    if not config:
+        return
     client = octopus.GraphQLClient(config=config)
     client.authenticate()
     dispatches = client.query_dispatches(config.device_id)
