@@ -48,6 +48,9 @@ def off_peak_range_to_transitions(off_peak_start: time, off_peak_end: time):
         transitions.append(Transition(MIDNIGHT, True))
         transitions.append(Transition(off_peak_end, False))
         transitions.append(Transition(off_peak_start, True))
+    elif off_peak_start == off_peak_end:  # all day offpeak
+        transitions.append(Transition(off_peak_start, True))
+        transitions.append(Transition(time(23, 30), True))
     else:
         transitions.append(Transition(off_peak_start, True))
         transitions.append(Transition(off_peak_end, False))
@@ -120,11 +123,4 @@ def new_base_schedule(config: Config) -> Schedule:
     if len(schedule_lines) != 6:
         logger.error("Incorrect number of schedule lines generated", schedule_lines_qty=len(schedule_lines))
         raise ValueError("Incorrect number of schedule lines generated")
-    return Schedule(
-        slot_1=schedule_lines[0],
-        slot_2=schedule_lines[1],
-        slot_3=schedule_lines[2],
-        slot_4=schedule_lines[3],
-        slot_5=schedule_lines[4],
-        slot_6=schedule_lines[5],
-    )
+    return Schedule(*schedule_lines)
