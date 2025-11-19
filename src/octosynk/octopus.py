@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable
 
@@ -27,6 +27,31 @@ class AuthenticationError(GraphQLError):
 class Dispatch:
     start_datetime_utc: datetime
     end_datetime_utc: datetime
+
+
+def merge_dispatches(dispatches: list[Dispatch]) -> list[Dispatch]:
+    """Merge dispatches with overlapping times into a single Dispatch
+
+    Returns a sorted list of Dispatches
+    """
+    if not dispatches:
+        return []
+    sorted_dispatches = sorted(dispatches, key=lambda d: d.start_datetime_utc)
+    merged_dispatches: list[Dispatch] = []
+    current = sorted_dispatches[0]
+    for next_dispatch in sorted_dispatches[1:]:
+        if current.end_datetime_utc >= next_dispatch.start_datetime_utc:
+            current = Dispatch(
+                current.start_datetime_utc,
+                end_datetime_utc=max(current.end_datetime_utc, next_dispatch.end_datetime_utc),
+            )
+        else:
+            merged_dispatches.append(current)
+            current = next_dispatch
+    # Add the final dispatch
+    merged_dispatches.append(current)
+
+    return merged_dispatches
 
 
 def authentication_required(method: Callable):
@@ -130,8 +155,8 @@ class GraphQLClient:
         dispatches_data = data.get("data", {}).get("flexPlannedDispatches", [])
         return [
             Dispatch(
-                start_datetime_utc=datetime.fromisoformat(dispatch.get("start")),
-                end_datetime_utc=datetime.fromisoformat(dispatch.get("end")),
+                start_datetime_utc=datetime.fromisoformat(dispatch.get("start")).astimezone(timezone.utc),
+                end_datetime_utc=datetime.fromisoformat(dispatch.get("end")).astimezone(timezone.utc),
             )
             for dispatch in dispatches_data
         ]

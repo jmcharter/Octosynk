@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from octosynk.octopus import AuthenticationError, Dispatch
+from octosynk.octopus import AuthenticationError, Dispatch, merge_dispatches
 
 
 class TestAuthenticate:
@@ -76,3 +76,103 @@ class TestQueryDispatches:
     def test_requires_authentication(self, client):
         with pytest.raises(AuthenticationError):
             client.query_dispatches("device-123")
+
+
+@pytest.mark.parametrize(
+    "input_dispatches,expected_output",
+    [
+        # Test case 1: Two overlapping dispatches
+        (
+            [
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 12, 0)),
+                Dispatch(datetime(2024, 1, 1, 11, 0), datetime(2024, 1, 1, 13, 0)),
+            ],
+            [Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 13, 0))],
+        ),
+        # Test case 2: Two non-overlapping dispatches
+        (
+            [
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 11, 0)),
+                Dispatch(datetime(2024, 1, 1, 12, 0), datetime(2024, 1, 1, 13, 0)),
+            ],
+            [
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 11, 0)),
+                Dispatch(datetime(2024, 1, 1, 12, 0), datetime(2024, 1, 1, 13, 0)),
+            ],
+        ),
+        # Test case 3: Three dispatches, all overlapping
+        (
+            [
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 12, 0)),
+                Dispatch(datetime(2024, 1, 1, 11, 0), datetime(2024, 1, 1, 13, 0)),
+                Dispatch(datetime(2024, 1, 1, 12, 30), datetime(2024, 1, 1, 14, 0)),
+            ],
+            [Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 14, 0))],
+        ),
+        # Test case 4: One dispatch contained entirely within another
+        (
+            [
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 14, 0)),
+                Dispatch(datetime(2024, 1, 1, 11, 0), datetime(2024, 1, 1, 12, 0)),
+            ],
+            [Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 14, 0))],
+        ),
+        # Test case 5: Multiple groups of overlapping dispatches
+        (
+            [
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 11, 0)),
+                Dispatch(datetime(2024, 1, 1, 10, 30), datetime(2024, 1, 1, 11, 30)),
+                Dispatch(datetime(2024, 1, 1, 14, 0), datetime(2024, 1, 1, 15, 0)),
+                Dispatch(datetime(2024, 1, 1, 14, 30), datetime(2024, 1, 1, 16, 0)),
+            ],
+            [
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 11, 30)),
+                Dispatch(datetime(2024, 1, 1, 14, 0), datetime(2024, 1, 1, 16, 0)),
+            ],
+        ),
+        # Test case 6: Dispatches that touch exactly (end time == start time)
+        (
+            [
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 11, 0)),
+                Dispatch(datetime(2024, 1, 1, 11, 0), datetime(2024, 1, 1, 12, 0)),
+            ],
+            [Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 12, 0))],
+        ),
+        # Test case 7: Single dispatch
+        (
+            [Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 11, 0))],
+            [Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 11, 0))],
+        ),
+        # Test case 8: Empty list
+        (
+            [],
+            [],
+        ),
+        # Test case 9: Unsorted input dispatches
+        (
+            [
+                Dispatch(datetime(2024, 1, 1, 14, 0), datetime(2024, 1, 1, 15, 0)),
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 11, 0)),
+                Dispatch(datetime(2024, 1, 1, 10, 30), datetime(2024, 1, 1, 12, 0)),
+            ],
+            [
+                Dispatch(datetime(2024, 1, 1, 10, 0), datetime(2024, 1, 1, 12, 0)),
+                Dispatch(datetime(2024, 1, 1, 14, 0), datetime(2024, 1, 1, 15, 0)),
+            ],
+        ),
+    ],
+    ids=[
+        "two_overlapping",
+        "two_non_overlapping",
+        "three_all_overlapping",
+        "one_contained_in_another",
+        "multiple_groups",
+        "exact_touching_times",
+        "single_dispatch",
+        "empty_list",
+        "unsorted_input",
+    ],
+)
+def test_merge_dispatches(input_dispatches, expected_output):
+    result = merge_dispatches(input_dispatches)
+    assert result == expected_output
