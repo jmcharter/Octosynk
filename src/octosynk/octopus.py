@@ -1,12 +1,12 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from functools import wraps
 from typing import Any, Callable
 
 import requests
 import structlog
 
-from octosynk.config import Config
+from octosynk.config import Config, TimeWindow
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -52,6 +52,50 @@ def merge_dispatches(dispatches: list[Dispatch]) -> list[Dispatch]:
     merged_dispatches.append(current)
 
     return merged_dispatches
+
+
+def trim_dispatches(dispatches: list[Dispatch], off_peak_windows: list[TimeWindow]) -> list[Dispatch]:
+    """Trim dispatches to remove portions that overlap with off-peak windows.
+
+    Keeps only the parts of dispatches that fall outside the off-peak windows,
+    since the base schedule already handles charging during off-peak.
+    """
+    if not dispatches:
+        return []
+
+    trimmed = []
+    for dispatch in dispatches:
+        start_time = dispatch.start_datetime_utc.time()
+        end_time = dispatch.end_datetime_utc.time()
+
+        # Check if dispatch is entirely within any off-peak window
+        entirely_within = False
+        for window in off_peak_windows:
+            if start_time >= window.start and end_time <= window.end:
+                entirely_within = True
+                break
+
+        if entirely_within:
+            continue  # Skip this dispatch - it's redundant
+
+        # Check if dispatch needs trimming at the start
+        new_start = dispatch.start_datetime_utc
+        for window in off_peak_windows:
+            # If dispatch starts during off-peak but ends after it
+            if start_time >= window.start and start_time < window.end and end_time > window.end:
+                # Trim start to window end
+                new_start = dispatch.start_datetime_utc.replace(
+                    hour=window.end.hour,
+                    minute=window.end.minute,
+                    second=0,
+                    microsecond=0
+                )
+                break
+
+        if new_start < dispatch.end_datetime_utc:
+            trimmed.append(Dispatch(new_start, dispatch.end_datetime_utc))
+
+    return trimmed
 
 
 def authentication_required(method: Callable):

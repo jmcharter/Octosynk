@@ -3,6 +3,12 @@ from datetime import time
 
 
 @dataclass
+class TimeWindow:
+    start: time
+    end: time
+
+
+@dataclass
 class Config:
     octopus_api_key: str
     device_id: str
@@ -12,3 +18,20 @@ class Config:
     max_power_watts: int = 8000
     soc_max: int = 100
     soc_min: int = 7
+
+    @property
+    def off_peak_windows(self) -> list[TimeWindow]:
+        """Convert off-peak range to windows that don't cross midnight.
+
+        Example: 23:30 - 05:30 becomes:
+        - [TimeWindow(00:00, 05:30), TimeWindow(23:30, 00:00)]
+        """
+        MIDNIGHT = time(0, 0)
+
+        if self.off_peak_start_time > self.off_peak_end_time:
+            return [
+                TimeWindow(MIDNIGHT, self.off_peak_end_time),
+                TimeWindow(self.off_peak_start_time, MIDNIGHT)
+            ]
+        else:
+            return [TimeWindow(self.off_peak_start_time, self.off_peak_end_time)]

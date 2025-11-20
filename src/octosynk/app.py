@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 from datetime import time
 import os
+from octosynk.schedules import Schedule, Transition, new_base_schedule
 import structlog
 
 from octosynk.config import Config
@@ -46,6 +48,22 @@ def get_config() -> Config | None:
     )
 
 
+def dispatches_to_transitions(dispatches: list[octopus.Dispatch]) -> list[Transition]:
+    transitions: list[Transition] = []
+    for dispatch in dispatches:
+        if dispatch.start_datetime_utc > dispatch.end_datetime_utc:
+            raise ValueError("Dispatch start time should never be later than dispatch end time")
+        t1 = Transition(time_utc=dispatch.start_datetime_utc.time(), off_peak=True)
+        t2 = Transition(time_utc=dispatch.end_datetime_utc.time(), off_peak=False)
+
+    return transitions
+
+
+def get_schedule_from_octopus_dispatches(dispatches: list[octopus.Dispatch], config: Config) -> Schedule:
+    schedule = new_base_schedule(config)
+    return schedule
+
+
 def run():
     config = get_config()
     if not config:
@@ -53,6 +71,9 @@ def run():
     client = octopus.GraphQLClient(config=config)
     client.authenticate()
     dispatches = client.query_dispatches(config.device_id)
+    dispatches = octopus.merge_dispatches(dispatches)
+    dispatches = octopus.trim_dispatches(dispatches, config.off_peak_windows)
+    # schedules = get_schedules_from_octopus_dispatches(dispatches, config)
     print(dispatches)
 
 
