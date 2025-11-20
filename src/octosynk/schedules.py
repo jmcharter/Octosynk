@@ -26,6 +26,18 @@ class Schedule:
     slot_5: ScheduleLine
     slot_6: ScheduleLine
 
+    def __str__(self) -> str:
+        lines = ["Schedule:"]
+        for i in range(1, 7):
+            slot = getattr(self, f"slot_{i}")
+            lines.append(
+                f"  Slot {i}: {slot.from_datetime_utc.strftime('%H:%M')} | "
+                f"{'Charge' if slot.charge else 'Discharge'} | "
+                f"{slot.power_watts}W | "
+                f"Target: {slot.target_soc}%"
+            )
+        return "\n".join(lines)
+
 
 def today_at_utc(time_of_day: time) -> datetime:
     """Return a datetime representing today at the given time"""

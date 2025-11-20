@@ -52,15 +52,14 @@ def dispatches_to_transitions(dispatches: list[octopus.Dispatch]) -> list[Transi
     for dispatch in dispatches:
         if dispatch.start_datetime_utc > dispatch.end_datetime_utc:
             raise ValueError("Dispatch start time should never be later than dispatch end time")
-        t1 = Transition(time_utc=dispatch.start_datetime_utc.time(), off_peak=True)
-        t2 = Transition(time_utc=dispatch.end_datetime_utc.time(), off_peak=False)
+        transitions.extend(
+            [
+                Transition(time_utc=dispatch.start_datetime_utc.time(), off_peak=True),
+                Transition(time_utc=dispatch.end_datetime_utc.time(), off_peak=False),
+            ]
+        )
 
     return transitions
-
-
-def get_schedule_from_octopus_dispatches(dispatches: list[octopus.Dispatch], config: Config) -> Schedule:
-    schedule = new_schedule(config)
-    return schedule
 
 
 def run():
@@ -72,8 +71,9 @@ def run():
     dispatches = client.query_dispatches(config.device_id)
     dispatches = octopus.merge_dispatches(dispatches)
     dispatches = octopus.trim_dispatches(dispatches, config.off_peak_windows)
-    # schedules = get_schedules_from_octopus_dispatches(dispatches, config)
-    print(dispatches)
+    dispatch_transitions = dispatches_to_transitions(dispatches)
+    schedule = new_schedule(config, dispatch_transitions)
+    print(schedule)
 
 
 if __name__ == "__main__":
