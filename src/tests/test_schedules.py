@@ -2,7 +2,7 @@ from datetime import time
 
 import pytest
 
-from octosynk.config import Config
+from octosynk.config import Config, TimeWindow
 from octosynk.schedules import (
     new_base_schedule,
     off_peak_range_to_transitions,
@@ -20,10 +20,13 @@ from octosynk.schedules import (
 def test_off_peak_range_to_transitions(
     off_peak_start: time,
     off_peak_end: time,
+    config: Config,
 ):
-    transitions = off_peak_range_to_transitions(off_peak_start, off_peak_end)
+    config.off_peak_start_time = off_peak_start
+    config.off_peak_end_time = off_peak_end
+    transitions = off_peak_range_to_transitions(config.off_peak_windows)
     assert transitions is not None
-    assert transitions[0].time_utc == time(0)  # Midnight
+    assert transitions[0].time_utc == time(0)
     assert len(transitions) == 6
 
 

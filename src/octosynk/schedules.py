@@ -4,7 +4,7 @@ from typing import NamedTuple
 import structlog
 
 
-from octosynk.config import Config
+from octosynk.config import Config, TimeWindow
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -37,30 +37,32 @@ class Transition(NamedTuple):
     off_peak: bool
 
 
-def off_peak_range_to_transitions(off_peak_start: time, off_peak_end: time):
-    """Given an off-peak range between `start_time` and `end_time`, return a
-    list of exactly 6 `Transition`s
+def off_peak_range_to_transitions(windows: list[TimeWindow]) -> list[Transition]:
+    """Convert TimeWindows to Transitions for schedule generation.
+
+    Returns a list of exactly 6 Transitions.
     """
     MIDNIGHT = time(0)
     transitions: list[Transition] = []
 
-    if off_peak_start > off_peak_end:  # if the offpeak time is later in the day
-        transitions.append(Transition(MIDNIGHT, True))
-        transitions.append(Transition(off_peak_end, False))
-        transitions.append(Transition(off_peak_start, True))
-    elif off_peak_start == off_peak_end:  # all day offpeak
-        transitions.append(Transition(off_peak_start, True))
-        transitions.append(Transition(time(23, 30), True))
-    else:
-        transitions.append(Transition(off_peak_start, True))
-        transitions.append(Transition(off_peak_end, False))
+    for window in windows:
+        # For all-day off-peak, window covers most of day (00:00 to 23:30)
+        if window.start == MIDNIGHT and window.end == time(23, 30):
+            # All-day off-peak special case - both transitions are True
+            transitions.append(Transition(window.start, True))
+            transitions.append(Transition(window.end, True))
+        else:
+            # Normal case: window start = charging begins
+            transitions.append(Transition(window.start, True))
+            # Only add end transition if it's not midnight (to avoid conflicts)
+            if window.end != MIDNIGHT:
+                transitions.append(Transition(window.end, False))
 
-    # Always start from midnight
+    # Always start from midnight if not already present
     if not any(t.time_utc == MIDNIGHT for t in transitions):
         transitions.append(Transition(MIDNIGHT, False))
 
     transitions = sorted(transitions, key=lambda x: x.time_utc)
-
     transitions = pad_transitions(transitions)
 
     return transitions
@@ -110,7 +112,7 @@ def new_base_schedule(config: Config) -> Schedule:
     # ...
     # Slot 6 = 23:30 - 00:00
 
-    transitions = off_peak_range_to_transitions(config.off_peak_start_time, config.off_peak_end_time)
+    transitions = off_peak_range_to_transitions(config.off_peak_windows)
     schedule_lines = [
         ScheduleLine(
             today_at_utc(transition.time_utc),

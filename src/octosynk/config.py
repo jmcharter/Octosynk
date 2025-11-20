@@ -25,10 +25,15 @@ class Config:
 
         Example: 23:30 - 05:30 becomes:
         - [TimeWindow(00:00, 05:30), TimeWindow(23:30, 00:00)]
+
+        Special case: If start == end, returns window covering the entire day (all-day off-peak)
         """
         MIDNIGHT = time(0, 0)
 
-        if self.off_peak_start_time > self.off_peak_end_time:
+        if self.off_peak_start_time == self.off_peak_end_time:
+            # All-day off-peak - return window covering full day
+            return [TimeWindow(MIDNIGHT, time(23, 30))]
+        elif self.off_peak_start_time > self.off_peak_end_time:
             return [
                 TimeWindow(MIDNIGHT, self.off_peak_end_time),
                 TimeWindow(self.off_peak_start_time, MIDNIGHT)
