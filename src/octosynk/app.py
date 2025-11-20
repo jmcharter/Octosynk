@@ -1,7 +1,6 @@
-from dataclasses import dataclass
 from datetime import time
 import os
-from octosynk.schedules import Schedule, Transition, new_base_schedule
+from octosynk.schedules import Schedule, Transition, new_schedule
 import structlog
 
 from octosynk.config import Config
@@ -60,7 +59,7 @@ def dispatches_to_transitions(dispatches: list[octopus.Dispatch]) -> list[Transi
 
 
 def get_schedule_from_octopus_dispatches(dispatches: list[octopus.Dispatch], config: Config) -> Schedule:
-    schedule = new_base_schedule(config)
+    schedule = new_schedule(config)
     return schedule
 
 

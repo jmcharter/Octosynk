@@ -4,30 +4,41 @@ import pytest
 
 from octosynk.config import Config, TimeWindow
 from octosynk.schedules import (
-    new_base_schedule,
+    new_schedule,
     off_peak_range_to_transitions,
     today_at_utc,
 )
 
 
 @pytest.mark.parametrize(
-    "off_peak_start,off_peak_end",
+    "off_peak_start,off_peak_end,expected_transitions",
     [
-        (time(23, 30), time(5, 30)),
-        (time(1, 0), time(7, 0)),
+        (
+            time(23, 30),
+            time(5, 30),
+            3,  # midnight (False->True), off_peak_end (True->False), off_peak_start (False->True)
+        ),
+        (
+            time(1, 0),
+            time(7, 0),
+            3,  # midnight (False), off_peak_start (False->True), off_peak_end (True->False)
+        ),
     ],
 )
 def test_off_peak_range_to_transitions(
     off_peak_start: time,
     off_peak_end: time,
+    expected_transitions: int,
     config: Config,
 ):
+    """Test that off_peak_range_to_transitions converts TimeWindows to basic transitions"""
     config.off_peak_start_time = off_peak_start
     config.off_peak_end_time = off_peak_end
     transitions = off_peak_range_to_transitions(config.off_peak_windows)
     assert transitions is not None
-    assert transitions[0].time_utc == time(0)
-    assert len(transitions) == 6
+    assert len(transitions) == expected_transitions
+    # Verify midnight is always present
+    assert any(t.time_utc == time(0) for t in transitions)
 
 
 @pytest.mark.parametrize(
@@ -110,7 +121,7 @@ def test_new_base_schedule(
     config.off_peak_start_time = off_peak_start
     config.off_peak_end_time = off_peak_end
 
-    schedule = new_base_schedule(config)
+    schedule = new_schedule(config)
 
     slots = [
         schedule.slot_1,
@@ -160,7 +171,7 @@ def test_new_base_schedule_charge_discharge_logic(config: Config):
     config.off_peak_start_time = time(2, 0)
     config.off_peak_end_time = time(6, 0)
 
-    schedule = new_base_schedule(config)
+    schedule = new_schedule(config)
     slots = [schedule.slot_1, schedule.slot_2, schedule.slot_3, schedule.slot_4, schedule.slot_5, schedule.slot_6]
 
     for slot in slots:

@@ -38,10 +38,7 @@ class Transition(NamedTuple):
 
 
 def off_peak_range_to_transitions(windows: list[TimeWindow]) -> list[Transition]:
-    """Convert TimeWindows to Transitions for schedule generation.
-
-    Returns a list of exactly 6 Transitions.
-    """
+    """Convert TimeWindows to Transitions for schedule generation."""
     MIDNIGHT = time(0)
     transitions: list[Transition] = []
 
@@ -61,9 +58,6 @@ def off_peak_range_to_transitions(windows: list[TimeWindow]) -> list[Transition]
     # Always start from midnight if not already present
     if not any(t.time_utc == MIDNIGHT for t in transitions):
         transitions.append(Transition(MIDNIGHT, False))
-
-    transitions = sorted(transitions, key=lambda x: x.time_utc)
-    transitions = pad_transitions(transitions)
 
     return transitions
 
@@ -102,7 +96,7 @@ def pad_transitions(transitions: list[Transition]) -> list[Transition]:
     return sorted(padded_transitions, key=lambda x: x.time_utc)
 
 
-def new_base_schedule(config: Config) -> Schedule:
+def new_schedule(config: Config, dispatch_transitions: list[Transition] | None = None) -> Schedule:
     # Schedules must start from no earlier than midnight, therefore if we have
     # an off-peak range that spans two days, e.g 23:30 to 05:30 then we must
     # start the schedule from midnight and start the final schedule from the
@@ -113,6 +107,10 @@ def new_base_schedule(config: Config) -> Schedule:
     # Slot 6 = 23:30 - 00:00
 
     transitions = off_peak_range_to_transitions(config.off_peak_windows)
+    if dispatch_transitions:
+        transitions = transitions + dispatch_transitions
+    transitions = sorted(transitions, key=lambda t: t.time_utc)
+    transitions = pad_transitions(transitions)
     schedule_lines = [
         ScheduleLine(
             today_at_utc(transition.time_utc),

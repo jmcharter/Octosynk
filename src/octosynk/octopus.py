@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable
 
@@ -85,10 +85,7 @@ def trim_dispatches(dispatches: list[Dispatch], off_peak_windows: list[TimeWindo
             if start_time >= window.start and start_time < window.end and end_time > window.end:
                 # Trim start to window end
                 new_start = dispatch.start_datetime_utc.replace(
-                    hour=window.end.hour,
-                    minute=window.end.minute,
-                    second=0,
-                    microsecond=0
+                    hour=window.end.hour, minute=window.end.minute, second=0, microsecond=0
                 )
                 break
 
