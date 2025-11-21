@@ -1,6 +1,7 @@
 from datetime import time
 import os
-from octosynk.schedules import Schedule, Transition, new_schedule
+from octosynk.schedules import Transition, new_schedule
+from octosynk.sunsynk import Client as SunsynkClient
 import structlog
 
 from octosynk.config import Config
@@ -35,7 +36,8 @@ def get_config() -> Config | None:
             sunsynk_auth_url=get_required_env("SUNSYNK_AUTH_URL", "https://api.sunsynk.net/oauth/"),
             sunsynk_username=get_required_env("SUNSYNK_USERNAME"),
             sunsynk_password=get_required_env("SUNSYNK_PASSWORD"),
-            device_id=get_required_env("DEVICE_ID"),
+            sunsynk_device_id=get_required_env("SUNSYNK_DEVICE_ID"),
+            octopus_device_id=get_required_env("OCTOPUS_DEVICE_ID"),
             octopus_api_url=get_required_env("OCTOPUS_API_URL", "https://api.octopus.energy/v1/graphql/"),
             off_peak_start_time=get_time_env("OFF_PEAK_START_TIME", "23:30"),
             off_peak_end_time=get_time_env("OFF_PEAK_END_TIME", "23:30"),
@@ -65,12 +67,16 @@ def run():
         return
     client = octopus.GraphQLClient(config=config)
     client.authenticate()
-    dispatches = client.query_dispatches(config.device_id)
+    dispatches = client.query_dispatches(config.octopus_device_id)
     dispatches = octopus.merge_dispatches(dispatches)
     dispatches = octopus.trim_dispatches(dispatches, config.off_peak_windows)
     dispatch_transitions = dispatches_to_transitions(dispatches)
     schedule = new_schedule(config, dispatch_transitions)
     print(schedule)
+
+    sun_client = SunsynkClient(config)
+    inverter_data = sun_client.get_inverter_data()
+    print(inverter_data)
 
 
 if __name__ == "__main__":

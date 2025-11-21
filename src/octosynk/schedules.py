@@ -27,15 +27,18 @@ class Schedule:
     slot_6: ScheduleLine
 
     def __str__(self) -> str:
-        lines = ["Schedule:"]
+        lines = ["Schedule", "=" * 40]
         for i in range(1, 7):
             slot = getattr(self, f"slot_{i}")
+            mode = "Charge" if slot.charge else "Discharge"
             lines.append(
-                f"  Slot {i}: {slot.from_datetime_utc.strftime('%H:%M')} | "
-                f"{'Charge' if slot.charge else 'Discharge'} | "
-                f"{slot.power_watts}W | "
-                f"Target: {slot.target_soc}%"
+                f"Slot {i}: {slot.from_datetime_utc.strftime('%H:%M')} → "
+                f"{slot.power_watts:,}W to {slot.target_soc}% SOC ({mode})"
             )
+
+        charging_slots = sum(1 for i in range(1, 7) if getattr(self, f"slot_{i}").charge)
+        lines.append("=" * 40)
+        lines.append(f"Charging slots: {charging_slots}/6")
         return "\n".join(lines)
 
 

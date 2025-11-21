@@ -11,12 +11,13 @@ class TimeWindow:
 @dataclass
 class Config:
     octopus_api_key: str
-    device_id: str
+    octopus_device_id: str
     octopus_api_url: str
     sunsynk_auth_url: str
     sunsynk_api_url: str
     sunsynk_username: str
     sunsynk_password: str
+    sunsynk_device_id: str
     off_peak_start_time: time
     off_peak_end_time: time
     max_power_watts: int = 8000

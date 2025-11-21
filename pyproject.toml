@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Application for pulling Octopus Intelligent smart plans and setting a Sunsynk inverter to charge accordingly"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["requests>=2.32.5", "structlog>=25.5.0"]
+dependencies = [
+    "cryptography>=46.0.3",
+    "requests>=2.32.5",
+ "structlog>=25.5.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.9,<0.10.0"]
