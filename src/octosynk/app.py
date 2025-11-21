@@ -11,40 +11,37 @@ logger = structlog.stdlib.get_logger(__name__)
 
 
 def get_config() -> Config | None:
-    octopus_api_key = os.environ.get("OCTOPUS_API_KEY")
-    if not octopus_api_key:
-        logger.error("OCTOPUS_API_KEY environment variable is required")
-        return
-    device_id = os.environ.get("DEVICE_ID")
-    if not device_id:
-        logger.error("DEVICE_ID environment variable is required")
-        return
-    off_peak_start_time_str = os.environ.get("OFF_PEAK_START_TIME", "23:30")
-    if not off_peak_start_time_str:
-        logger.error("OFF_PEAK_START_TIME environment variable is required")
-        return
-    try:
-        off_peak_start_time = time.fromisoformat(off_peak_start_time_str)
-    except ValueError:
-        logger.error("OFF_PEAK_START_TIME must be of format: hh:mm, e.g 14:00")
-        return
-    off_peak_end_time_str = os.environ.get("OFF_PEAK_END_TIME", "23:30")
-    if not off_peak_end_time_str:
-        logger.error("OFF_PEAK_END_TIME environment variable is required")
-        return
-    try:
-        off_peak_end_time = time.fromisoformat(off_peak_end_time_str)
-    except ValueError:
-        logger.error("OFF_PEAK_END_TIME must be of format: hh:mm, e.g 14:00")
-        return
+    def get_required_env(key: str, default: str | None = None) -> str:
+        value = os.environ.get(key)
+        if not value:
+            if default:
+                return default
+            logger.error(f"{key} environment variable is required")
+            raise ValueError(f"{key} is required")
+        return value
 
-    return Config(
-        octopus_api_key=octopus_api_key,
-        device_id=device_id,
-        graphql_base_url=os.environ.get("GRAPHQL_BASE_URL", "https://api.octopus.energy/v1/graphql/"),
-        off_peak_start_time=off_peak_start_time,
-        off_peak_end_time=off_peak_end_time,
-    )
+    def get_time_env(key: str, default: str) -> time:
+        value = os.environ.get(key, default)
+        try:
+            return time.fromisoformat(value)
+        except ValueError:
+            logger.error(f"{key} must be of format: hh:mm, e.g 14:00")
+            raise
+
+    try:
+        return Config(
+            octopus_api_key=get_required_env("OCTOPUS_API_KEY"),
+            sunsynk_api_url=get_required_env("SUNSYNK_API_URL", "https://api.sunsynk.net/api/v1/"),
+            sunsynk_auth_url=get_required_env("SUNSYNK_AUTH_URL", "https://api.sunsynk.net/oauth/"),
+            sunsynk_username=get_required_env("SUNSYNK_USERNAME"),
+            sunsynk_password=get_required_env("SUNSYNK_PASSWORD"),
+            device_id=get_required_env("DEVICE_ID"),
+            octopus_api_url=get_required_env("OCTOPUS_API_URL", "https://api.octopus.energy/v1/graphql/"),
+            off_peak_start_time=get_time_env("OFF_PEAK_START_TIME", "23:30"),
+            off_peak_end_time=get_time_env("OFF_PEAK_END_TIME", "23:30"),
+        )
+    except ValueError:
+        return None
 
 
 def dispatches_to_transitions(dispatches: list[octopus.Dispatch]) -> list[Transition]:

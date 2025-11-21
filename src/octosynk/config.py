@@ -12,7 +12,11 @@ class TimeWindow:
 class Config:
     octopus_api_key: str
     device_id: str
-    graphql_base_url: str
+    octopus_api_url: str
+    sunsynk_auth_url: str
+    sunsynk_api_url: str
+    sunsynk_username: str
+    sunsynk_password: str
     off_peak_start_time: time
     off_peak_end_time: time
     max_power_watts: int = 8000
@@ -34,9 +38,6 @@ class Config:
             # All-day off-peak - return window covering full day
             return [TimeWindow(MIDNIGHT, time(23, 30))]
         elif self.off_peak_start_time > self.off_peak_end_time:
-            return [
-                TimeWindow(MIDNIGHT, self.off_peak_end_time),
-                TimeWindow(self.off_peak_start_time, MIDNIGHT)
-            ]
+            return [TimeWindow(MIDNIGHT, self.off_peak_end_time), TimeWindow(self.off_peak_start_time, MIDNIGHT)]
         else:
             return [TimeWindow(self.off_peak_start_time, self.off_peak_end_time)]

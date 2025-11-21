@@ -114,7 +114,7 @@ class GraphQLClient:
     def __init__(self, config: Config):
         if not config.octopus_api_key:
             raise ValueError("Octopus API key is required")
-        self.base_url = config.graphql_base_url
+        self.base_url = config.octopus_api_url
         self.api_key = config.octopus_api_key
         self.auth_token = None
 
