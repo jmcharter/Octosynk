@@ -76,6 +76,24 @@ def run():
 
     sun_client = SunsynkClient(config)
     inverter_data = sun_client.get_inverter_data()
+    print("-")
+    print(inverter_data)
+
+    # Convert schedule to inverter write configuration
+    from octosynk.sunsynk import schedule_to_inverter_write
+
+    inverter_write = schedule_to_inverter_write(schedule)
+    print("-")
+    print(inverter_write)
+
+    print("Writing...")
+    res = sun_client.update_inverter_schedule(inverter_write)
+    print(f"Status: {res.status_code}")
+    print(res.text)
+    print()
+
+    inverter_data = sun_client.get_inverter_data()
+    print("-")
     print(inverter_data)
 
 

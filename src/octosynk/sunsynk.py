@@ -11,11 +11,6 @@ from octosynk.config import Config
 
 logger = structlog.stdlib.get_logger(__name__)
 
-# "sellTime1": "00:00",
-# "time1on": "true",
-# "cap1": "100",
-# "sellTime1Pac": "8000",
-
 
 @dataclass
 class InverterChargeSlot:
@@ -39,6 +34,15 @@ class InverterChargeSlot:
             target_soc=int(data[f"cap{slot_num}"]),
             enabled=data[f"time{slot_num}On"] == "1",
         )
+
+    def to_dict(self, slot_num: int) -> dict[str, Any]:
+        """Convert to API format (camelCase) for a specific slot number"""
+        return {
+            f"sellTime{slot_num}": self.start_time.strftime("%H:%M"),
+            f"sellTime{slot_num}Pac": str(self.power_watts),
+            f"cap{slot_num}": str(self.target_soc),
+            f"time{slot_num}On": "1" if self.enabled else "0",  # Note: capital 'O' in On, values "0"/"1"
+        }
 
     def __str__(self) -> str:
         status = "Enabled" if self.enabled else "Disabled"
@@ -75,6 +79,96 @@ class SunsynkInverterRead:
         return "\n".join(lines)
 
 
+@dataclass
+class SunsynkInverterWrite:
+    """Complete inverter charge configuration for writing to API"""
+
+    charge_slots: list[InverterChargeSlot]
+
+    def __post_init__(self):
+        """Validate the configuration"""
+        if len(self.charge_slots) != 6:
+            raise ValueError(f"Must have exactly 6 charge slots, got {len(self.charge_slots)}")
+
+        for i, slot in enumerate(self.charge_slots, 1):
+            if not 0 <= slot.target_soc <= 100:
+                raise ValueError(f"Slot {i}: target_soc must be 0-100, got {slot.target_soc}")
+            if slot.power_watts < 0:
+                raise ValueError(f"Slot {i}: power_watts must be positive, got {slot.power_watts}")
+
+    @classmethod
+    def from_read(cls, read_config: SunsynkInverterRead) -> "SunsynkInverterWrite":
+        """Create a write config from a read config"""
+        return cls(charge_slots=read_config.charge_slots.copy())
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to API format (camelCase) for writing"""
+        result = {}
+
+        if self.charge_slots is not None:
+            for i, slot in enumerate(self.charge_slots, 1):
+                result.update(slot.to_dict(i))
+
+        return result
+
+    def update_slot(self, slot_num: int, slot: InverterChargeSlot) -> "SunsynkInverterWrite":
+        """
+        Update a single slot and return self for chaining.
+        slot_num is 1-indexed (1-6).
+        """
+        if not 1 <= slot_num <= 6:
+            raise ValueError(f"slot_num must be 1-6, got {slot_num}")
+
+        if self.charge_slots is None:
+            # Create empty slots if not initialized
+            self.charge_slots = [InverterChargeSlot(time(0, 0), 0, 0, False) for _ in range(6)]
+
+        self.charge_slots[slot_num - 1] = slot
+        return self
+
+    def __str__(self) -> str:
+        """Pretty print the charge configuration"""
+        lines = ["Inverter Charge Configuration (Write)", "=" * 40]
+
+        for i, slot in enumerate(self.charge_slots, 1):
+            lines.append(f"Slot {i}: {slot}")
+
+        lines.append("=" * 40)
+        active_count = sum(1 for slot in self.charge_slots if slot.enabled)
+        lines.append(f"Active slots: {active_count}/6")
+
+        return "\n".join(lines)
+
+
+def create_charge_config(
+    slot_1: InverterChargeSlot,
+    slot_2: InverterChargeSlot,
+    slot_3: InverterChargeSlot,
+    slot_4: InverterChargeSlot,
+    slot_5: InverterChargeSlot,
+    slot_6: InverterChargeSlot,
+) -> SunsynkInverterWrite:
+    """Helper to create a write configuration with all 6 slots"""
+    return SunsynkInverterWrite(charge_slots=[slot_1, slot_2, slot_3, slot_4, slot_5, slot_6])
+
+
+def schedule_to_inverter_write(schedule: "Schedule") -> SunsynkInverterWrite:
+    """Convert a Schedule to a SunsynkInverterWrite configuration"""
+    from octosynk.schedules import Schedule
+
+    charge_slots = [
+        InverterChargeSlot(
+            start_time=getattr(schedule, f"slot_{i}").from_datetime_utc.time(),
+            power_watts=getattr(schedule, f"slot_{i}").power_watts,
+            target_soc=getattr(schedule, f"slot_{i}").target_soc,
+            enabled=getattr(schedule, f"slot_{i}").charge,
+        )
+        for i in range(1, 7)
+    ]
+
+    return SunsynkInverterWrite(charge_slots=charge_slots)
+
+
 class Client:
     base_url: str
     token: str | None
@@ -107,9 +201,10 @@ class Client:
         token = self._authenticator.get_token()
         headers = kwargs.pop("headers", {}).copy()
         headers["Authorization"] = f"Bearer {token}"
+        print(kwargs)
         for attempt in range(2):
             try:
-                response = requests.request(method=method, url=url, headers=headers, timeout=self._timeout)
+                response = requests.request(method=method, url=url, headers=headers, timeout=self._timeout, **kwargs)
                 if response.status_code == 401 and attempt == 0:
                     self._authenticator.clear_token()  # Clear token so a new one will be generated
                     continue
@@ -127,3 +222,9 @@ class Client:
         if not data:
             logger.info("No inverter data found for device", device_id=self.device_id)
         return SunsynkInverterRead.from_dict(data)
+
+    def update_inverter_schedule(self, data: SunsynkInverterWrite) -> requests.Response:
+        post_data = data.to_dict()
+        logger.debug("Sending update request to inverter", data=post_data)
+        response = self._request("POST", "common/setting/2406164025/set", json=post_data)
+        return response

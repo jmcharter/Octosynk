@@ -93,8 +93,8 @@ def pad_transitions(transitions: list[Transition]) -> list[Transition]:
 
     """
     if len(transitions) >= 6:
-        logger.error("More than 6 transitions", transitions_qty=len(transitions))
-        raise ValueError("More than 6 transitions")
+        logger.debug("No padding required", transition_qty=len(transitions))
+        return transitions
     all_times = [time(h, m) for h in range(24) for m in [0, 30]]
     used_times = [t.time_utc for t in transitions]
     available_times = [t for t in all_times if t not in used_times]
@@ -111,6 +111,22 @@ def pad_transitions(transitions: list[Transition]) -> list[Transition]:
     return sorted(padded_transitions, key=lambda x: x.time_utc)
 
 
+def trim_transitions(transitions: list[Transition]) -> list[Transition]:
+    """Trim a sorted list of transitions until there are 6 or fewer
+
+    Removes past transitions until only future transitions remain and then
+    returns 6 of remaining transitions"""
+    if len(transitions) <= 6:
+        logger.debug("No trim required", transition_qty=len(transitions))
+        return transitions
+    time_now = datetime.now(tz=timezone.utc).time()
+    while len(transitions) > 6:
+        if transitions[0].time_utc > time_now:  # All transitions are in the future
+            break
+        transitions.pop(0)
+    return transitions[:6]
+
+
 def new_schedule(config: Config, dispatch_transitions: list[Transition] | None = None) -> Schedule:
     # Schedules must start from no earlier than midnight, therefore if we have
     # an off-peak range that spans two days, e.g 23:30 to 05:30 then we must
@@ -125,7 +141,10 @@ def new_schedule(config: Config, dispatch_transitions: list[Transition] | None =
     if dispatch_transitions:
         transitions = transitions + dispatch_transitions
     transitions = sorted(transitions, key=lambda t: t.time_utc)
+    logger.debug("Transitions gathered", transitions=transitions)
     transitions = pad_transitions(transitions)
+    transitions = trim_transitions(transitions)
+
     schedule_lines = [
         ScheduleLine(
             today_at_utc(transition.time_utc),
