@@ -2,6 +2,17 @@
 
 Octosynk synchronizes Octopus Energy "Intelligent" tariff charging schedules with Sunsynk solar inverters, optimizing battery charging by combining regular off-peak rates with smart dispatch windows.
 
+## ⚠️ WARNING
+
+**USE AT YOUR OWN RISK.** This software modifies settings on your solar inverter. The authors provide **NO WARRANTY** of any kind, express or implied. By using this software, you acknowledge that:
+
+- You understand it will automatically change your inverter's charging schedule
+- Any misconfiguration could result in unexpected behavior or equipment issues
+- You are solely responsible for monitoring your inverter and energy system
+- The authors are not liable for any damages, losses, or issues that may arise from use of this software
+
+If you are not comfortable with automated inverter control, do not use this software.
+
 ## Features
 
 - Fetches planned dispatch times from Octopus Energy Intelligent API
