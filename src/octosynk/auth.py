@@ -7,11 +7,18 @@ import structlog
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = structlog.stdlib.get_logger(__name__)
 
 
 class SunsynkAPIError(Exception): ...
+
+
+class RetryableSunsynkError(SunsynkAPIError):
+    """Raised for transient errors that should be retried"""
+
+    pass
 
 
 class AuthenticationError(SunsynkAPIError): ...
@@ -32,6 +39,12 @@ class Authenticator:
         payload = f"nonce={nonce}&source={source}POWER_VIEW"
         return hashlib.md5(payload.encode()).hexdigest()
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((RetryableSunsynkError, requests.ConnectionError)),
+        reraise=True,
+    )
     def _fetch_public_key(self, source: str = "sunsynk") -> str:
         """Fetch the RSA public key from the dynamic endpoint."""
         if self._public_key_cache:
@@ -63,8 +76,18 @@ class Authenticator:
             self._public_key_cache = public_key_pem
             return public_key_pem
 
+        except requests.Timeout:
+            logger.warning("Timeout fetching public key, will retry")
+            raise RetryableSunsynkError("Timeout fetching public key")
+        except requests.HTTPError as e:
+            if e.response.status_code >= 500:
+                logger.warning("Server error fetching public key, will retry", status_code=e.response.status_code)
+                raise RetryableSunsynkError(f"HTTP server error: {e.response.status_code}")
+            else:
+                raise SunsynkAPIError(f"HTTP error fetching public key: {e.response.status_code}") from e
         except requests.RequestException as e:
-            raise SunsynkAPIError(f"Network error fetching public key: {e}") from e
+            logger.warning("Network error fetching public key, will retry")
+            raise RetryableSunsynkError(f"Network error fetching public key: {e}") from e
 
     def _encrypt_password(self, password: str) -> str:
         """Encrypt password using the dynamically fetched RSA public key."""
@@ -87,6 +110,12 @@ class Authenticator:
         )
         return base64.b64encode(encrypted).decode("utf-8")
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((RetryableSunsynkError, requests.ConnectionError)),
+        reraise=True,
+    )
     def authenticate(self) -> str:
         """Authenticate and return access token."""
         encrypted_password = self._encrypt_password(self.password)
@@ -114,11 +143,23 @@ class Authenticator:
                 timeout=self._timeout,
             )
             response.raise_for_status()
+        except requests.Timeout:
+            logger.warning("Authentication timeout, will retry")
+            raise RetryableSunsynkError("Authentication timeout")
         except requests.HTTPError as e:
-            logger.error("Authentication error", status=e.response.status_code)
-            raise AuthenticationError("Invalid username or password") from e
+            # Don't retry auth errors (4xx) except for rate limiting (429)
+            if e.response.status_code >= 500:
+                logger.warning("Server error during authentication, will retry", status_code=e.response.status_code)
+                raise RetryableSunsynkError(f"HTTP server error: {e.response.status_code}")
+            elif e.response.status_code == 429:
+                logger.warning("Rate limited, will retry")
+                raise RetryableSunsynkError("Rate limited")
+            else:
+                logger.error("Authentication error", status=e.response.status_code)
+                raise AuthenticationError("Invalid username or password") from e
         except requests.RequestException as e:
-            raise SunsynkAPIError(f"Network error during auth: {e}") from e
+            logger.warning("Network error during auth, will retry")
+            raise RetryableSunsynkError(f"Network error during auth: {e}") from e
 
         data = response.json()
         auth_data = data.get("data", {})

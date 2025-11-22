@@ -5,8 +5,9 @@ from urllib.parse import urljoin
 
 import requests
 import structlog
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from octosynk.auth import Authenticator, SunsynkAPIError
+from octosynk.auth import Authenticator, SunsynkAPIError, RetryableSunsynkError
 from octosynk.config import Config
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -188,6 +189,12 @@ class Client:
         """Authenticate with the Sunsynk API."""
         self._authenticator.authenticate()
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((RetryableSunsynkError, requests.ConnectionError)),
+        reraise=True,
+    )
     def _request(
         self,
         method: Literal["GET", "POST"],
@@ -201,18 +208,27 @@ class Client:
         token = self._authenticator.get_token()
         headers = kwargs.pop("headers", {}).copy()
         headers["Authorization"] = f"Bearer {token}"
-        print(kwargs)
         for attempt in range(2):
             try:
                 response = requests.request(method=method, url=url, headers=headers, timeout=self._timeout, **kwargs)
                 if response.status_code == 401 and attempt == 0:
                     self._authenticator.clear_token()  # Clear token so a new one will be generated
+                    token = self._authenticator.get_token()
+                    headers["Authorization"] = f"Bearer {token}"
                     continue
                 response.raise_for_status()
                 return response
+            except requests.Timeout:
+                logger.warning("Request timeout, will retry")
+                raise RetryableSunsynkError("Request timeout")
             except requests.HTTPError as e:
-                logger.exception("Error accessing Sunsynk API", status_code=e.response.status_code)
-                raise SunsynkAPIError(f"Error accessing Sunsynk API. Status {e.response.status_code}")
+                # Retry on 5xx server errors
+                if e.response.status_code >= 500:
+                    logger.warning("Server error, will retry", status_code=e.response.status_code)
+                    raise RetryableSunsynkError(f"HTTP server error: {e.response.status_code}")
+                else:
+                    logger.error("Error accessing Sunsynk API", status_code=e.response.status_code)
+                    raise SunsynkAPIError(f"Error accessing Sunsynk API. Status {e.response.status_code}")
         raise SunsynkAPIError("Failed after retry")
 
     def get_inverter_data(self) -> SunsynkInverterRead:

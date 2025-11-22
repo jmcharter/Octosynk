@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 import requests
 import structlog
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from octosynk.config import Config, TimeWindow
 
@@ -13,6 +14,12 @@ logger = structlog.stdlib.get_logger(__name__)
 
 class GraphQLError(Exception):
     """Raised for errors returned by GraphQL Queries"""
+
+    pass
+
+
+class RetryableGraphQLError(GraphQLError):
+    """Raised for transient errors that should be retried"""
 
     pass
 
@@ -118,6 +125,12 @@ class GraphQLClient:
         self.api_key = config.octopus_api_key
         self.auth_token = None
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((RetryableGraphQLError, requests.ConnectionError)),
+        reraise=True,
+    )
     def get_query(self, query_str: str, variables: dict[str, Any], auth_token: str | None = None) -> dict[str, Any]:
         headers = {
             "Content-Type": "application/json",
@@ -152,11 +165,16 @@ class GraphQLClient:
 
             return response_data
         except requests.Timeout:
-            logger.exception("Request timed out")
-            raise GraphQLError("Request timed out")
+            logger.warning("Request timed out, will retry")
+            raise RetryableGraphQLError("Request timed out")
         except requests.HTTPError as e:
-            logger.exception()
-            raise GraphQLError(f"HTTP error: {e.response.status_code}")
+            # Retry on 5xx server errors, but not on 4xx client errors
+            if e.response.status_code >= 500:
+                logger.warning("Server error, will retry", status_code=e.response.status_code)
+                raise RetryableGraphQLError(f"HTTP server error: {e.response.status_code}")
+            else:
+                logger.error("HTTP client error", status_code=e.response.status_code)
+                raise GraphQLError(f"HTTP error: {e.response.status_code}")
 
     def authenticate(self):
         query = """
@@ -176,6 +194,23 @@ class GraphQLClient:
             logger.error("Failed to acquire auth token")
             raise AuthenticationError("Failed to acquire auth token")
         self.auth_token = auth_token
+
+    @authentication_required
+    def query_devices(self, account_number: str) -> list[dict[str, Any]]:
+        """Query devices for an account and return id, name, and deviceType"""
+        query = """
+        query Devices($accountNumber: String!) {
+          devices(accountNumber: $accountNumber) {
+            id
+            name
+            deviceType
+          }
+        }
+        """
+        variables = {"accountNumber": account_number}
+        data = self.get_query(query, variables, self.auth_token)
+        devices_data = data.get("data", {}).get("devices", [])
+        return devices_data
 
     @authentication_required
     def query_dispatches(self, device_id: str) -> list[Dispatch]:

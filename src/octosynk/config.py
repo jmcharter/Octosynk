@@ -23,6 +23,8 @@ class Config:
     max_power_watts: int = 8000
     soc_max: int = 100
     soc_min: int = 7
+    healthcheck_uuid: str | None = None
+    log_level: str = "INFO"
 
     @property
     def off_peak_windows(self) -> list[TimeWindow]:

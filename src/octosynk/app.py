@@ -1,5 +1,7 @@
 from datetime import time
 import os
+import sys
+import requests
 from octosynk.schedules import Transition, new_schedule
 from octosynk.sunsynk import Client as SunsynkClient
 import structlog
@@ -9,6 +11,20 @@ from octosynk import octopus
 
 
 logger = structlog.stdlib.get_logger(__name__)
+
+
+def ping_healthcheck(uuid: str | None, endpoint: str = ""):
+    """Ping healthchecks.io with optional endpoint (/start, /fail, or empty for success)"""
+    if not uuid:
+        return
+
+    url = f"https://hc-ping.com/{uuid}{endpoint}"
+    try:
+        requests.get(url, timeout=10)
+        logger.debug("Healthcheck ping sent", endpoint=endpoint)
+    except Exception as e:
+        # Don't fail the application if healthcheck ping fails
+        logger.warning("Failed to ping healthcheck", error=str(e), endpoint=endpoint)
 
 
 def get_config() -> Config | None:
@@ -40,7 +56,9 @@ def get_config() -> Config | None:
             octopus_device_id=get_required_env("OCTOPUS_DEVICE_ID"),
             octopus_api_url=get_required_env("OCTOPUS_API_URL", "https://api.octopus.energy/v1/graphql/"),
             off_peak_start_time=get_time_env("OFF_PEAK_START_TIME", "23:30"),
-            off_peak_end_time=get_time_env("OFF_PEAK_END_TIME", "23:30"),
+            off_peak_end_time=get_time_env("OFF_PEAK_END_TIME", "05:30"),
+            healthcheck_uuid=get_required_env("HEALTHCHECK_UUID", None),
+            log_level=get_required_env("LOG_LEVEL", "INFO"),
         )
     except ValueError:
         return None
@@ -65,36 +83,49 @@ def run():
     config = get_config()
     if not config:
         return
-    client = octopus.GraphQLClient(config=config)
-    client.authenticate()
-    dispatches = client.query_dispatches(config.octopus_device_id)
-    dispatches = octopus.merge_dispatches(dispatches)
-    dispatches = octopus.trim_dispatches(dispatches, config.off_peak_windows)
-    dispatch_transitions = dispatches_to_transitions(dispatches)
-    schedule = new_schedule(config, dispatch_transitions)
-    print(schedule)
 
-    sun_client = SunsynkClient(config)
-    inverter_data = sun_client.get_inverter_data()
-    print("-")
-    print(inverter_data)
+    # Configure logging level
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(
+            getattr(structlog.stdlib, config.log_level.upper(), structlog.stdlib.INFO)
+        )
+    )
 
-    # Convert schedule to inverter write configuration
-    from octosynk.sunsynk import schedule_to_inverter_write
+    ping_healthcheck(config.healthcheck_uuid, "/start")
 
-    inverter_write = schedule_to_inverter_write(schedule)
-    print("-")
-    print(inverter_write)
+    try:
+        logger.info("Starting Octosynk run")
 
-    print("Writing...")
-    res = sun_client.update_inverter_schedule(inverter_write)
-    print(f"Status: {res.status_code}")
-    print(res.text)
-    print()
+        # Fetch and process Octopus dispatches
+        client = octopus.GraphQLClient(config=config)
+        client.authenticate()
+        dispatches = client.query_dispatches(config.octopus_device_id)
+        dispatches = octopus.merge_dispatches(dispatches)
+        dispatches = octopus.trim_dispatches(dispatches, config.off_peak_windows)
 
-    inverter_data = sun_client.get_inverter_data()
-    print("-")
-    print(inverter_data)
+        # Generate schedule from dispatches
+        dispatch_transitions = dispatches_to_transitions(dispatches)
+        schedule = new_schedule(config, dispatch_transitions)
+        logger.info("Generated schedule", active_slots=len([s for s in schedule.charge_slots if s.charge]))
+
+        # Update Sunsynk inverter
+        from octosynk.sunsynk import schedule_to_inverter_write
+
+        sun_client = SunsynkClient(config)
+        inverter_write = schedule_to_inverter_write(schedule)
+        res = sun_client.update_inverter_schedule(inverter_write)
+
+        if res.status_code == 200:
+            logger.info("Successfully updated inverter schedule")
+        else:
+            logger.warning("Unexpected response from inverter", status=res.status_code)
+
+        ping_healthcheck(config.healthcheck_uuid)
+
+    except Exception as e:
+        logger.exception("Octosynk run failed")
+        ping_healthcheck(config.healthcheck_uuid, "/fail")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
