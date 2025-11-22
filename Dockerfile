@@ -24,17 +24,22 @@ WORKDIR /app
 
 # Copy application code
 COPY src/ ./src/
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 
 # Install the application
 RUN pip install -e .
 
 # Create non-root user
-RUN useradd -m -u 1000 octosynk && \
+RUN useradd -m -u 1000 octosynk
+
+# Copy entrypoint script and set permissions
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && \
+    chown octosynk:octosynk /entrypoint.sh && \
     chown -R octosynk:octosynk /app
 
 # Switch to non-root user
 USER octosynk
 
-# Default command (will be overridden by Ofelia)
-CMD ["octosynk"]
+# Run entrypoint script (runs once immediately, then keeps container alive)
+CMD ["/entrypoint.sh"]

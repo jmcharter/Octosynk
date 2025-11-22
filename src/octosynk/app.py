@@ -1,4 +1,5 @@
 from datetime import time
+import logging
 import os
 import sys
 import requests
@@ -87,7 +88,7 @@ def run():
     # Configure logging level
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(structlog.stdlib, config.log_level.upper(), structlog.stdlib.INFO)
+            getattr(logging, config.log_level.upper(), logging.INFO)
         )
     )
 
@@ -106,7 +107,8 @@ def run():
         # Generate schedule from dispatches
         dispatch_transitions = dispatches_to_transitions(dispatches)
         schedule = new_schedule(config, dispatch_transitions)
-        logger.info("Generated schedule", active_slots=len([s for s in schedule.charge_slots if s.charge]))
+        active_slots = sum(1 for i in range(1, 7) if getattr(schedule, f"slot_{i}").charge)
+        logger.info("Generated schedule", active_slots=active_slots)
 
         # Update Sunsynk inverter
         from octosynk.sunsynk import schedule_to_inverter_write

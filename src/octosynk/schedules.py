@@ -139,7 +139,11 @@ def new_schedule(config: Config, dispatch_transitions: list[Transition] | None =
 
     transitions = off_peak_range_to_transitions(config.off_peak_windows)
     if dispatch_transitions:
-        transitions = transitions + dispatch_transitions
+        # Use dict to ensure dispatch transitions replace off-peak ones at the same time
+        transitions_dict = {t.time_utc: t for t in transitions}
+        for dt in dispatch_transitions:
+            transitions_dict[dt.time_utc] = dt
+        transitions = list(transitions_dict.values())
     transitions = sorted(transitions, key=lambda t: t.time_utc)
     logger.debug("Transitions gathered", transitions=transitions)
     transitions = pad_transitions(transitions)
