@@ -1,7 +1,6 @@
 services:
   octosynk:
-    build: .
-    image: octosynk:latest
+    image: ghcr.io/jmcharter/octosynk:latest
     container_name: octosynk
     env_file:
       - .env

@@ -117,17 +117,18 @@ uv run octosynk
 
 ## Deployment with Docker
 
+Pre-built Docker images are automatically published to GitHub Container Registry on every release.
+
 ### Initial Setup
 
-1. Clone the repository:
+1. Download the docker-compose.yml:
 ```bash
-git clone <repository-url>
-cd octosynk
+curl -O https://raw.githubusercontent.com/jmcharter/Octosynk/main/docker-compose.yml
 ```
 
 2. Create your `.env` file with all required configuration (see Configuration section above)
 
-3. Build and start the services:
+3. Start the services:
 ```bash
 docker-compose up -d
 ```
@@ -171,10 +172,9 @@ Restart after configuration changes:
 docker-compose restart
 ```
 
-Update to latest code:
+Update to latest version:
 ```bash
-git pull
-docker-compose build
+docker-compose pull
 docker-compose up -d
 ```
 
