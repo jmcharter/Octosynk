@@ -191,42 +191,9 @@ MQTT_TOPIC_PREFIX=octosynk
 docker-compose restart octosynk
 ```
 
-3. Add the following to your Home Assistant `configuration.yaml`:
+3. The entities will **automatically appear** in Home Assistant via MQTT Discovery!
 
-```yaml
-mqtt:
-  switch:
-    - name: "Octosynk Auto-Sync"
-      unique_id: octosynk_auto_sync
-      command_topic: "octosynk/enabled"
-      state_topic: "octosynk/enabled"
-      payload_on: "ON"
-      payload_off: "OFF"
-      icon: mdi:solar-power
-
-  sensor:
-    - name: "Octosynk Last Sync"
-      unique_id: octosynk_last_sync
-      state_topic: "octosynk/last_sync"
-      device_class: timestamp
-      icon: mdi:clock-check
-
-    - name: "Octosynk Active Slots"
-      unique_id: octosynk_active_slots
-      state_topic: "octosynk/active_slots"
-      unit_of_measurement: "slots"
-      icon: mdi:calendar-clock
-
-    - name: "Octosynk Next Dispatch"
-      unique_id: octosynk_next_dispatch
-      state_topic: "octosynk/next_dispatch"
-      device_class: timestamp
-      icon: mdi:clock-start
-```
-
-4. Restart Home Assistant or reload the MQTT integration
-
-You'll now have:
+Go to **Settings → Devices & Services → MQTT** and you should see a new "Octosynk" device with:
 - A switch to enable/disable automatic syncing
 - Sensors showing last sync time, active charging slots, and next dispatch time
 

@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 import structlog
 import paho.mqtt.client as mqtt
 from octosynk.config import Config
@@ -38,6 +39,10 @@ class MQTTClient:
         """Callback when connected to MQTT broker"""
         if rc == 0:
             logger.info("MQTT connection established")
+
+            # Publish Home Assistant discovery configs
+            self._publish_discovery_configs()
+
             # Subscribe to the enabled state topic
             enabled_topic = f"{self.config.mqtt_topic_prefix}/enabled"
             client.subscribe(enabled_topic)
@@ -56,6 +61,83 @@ class MQTTClient:
         if topic == f"{self.config.mqtt_topic_prefix}/enabled":
             self.enabled_state = payload
             logger.info("Enabled state updated", state=payload)
+
+    def _publish_discovery_configs(self):
+        """Publish Home Assistant MQTT Discovery configurations"""
+        if not self.client:
+            return
+
+        base_topic = f"homeassistant"
+        device_config = {
+            "identifiers": ["octosynk"],
+            "name": "Octosynk",
+            "model": "Octopus Intelligent Sync",
+            "manufacturer": "Octosynk",
+        }
+
+        # Switch for enabling/disabling sync
+        switch_config = {
+            "name": "Auto-Sync",
+            "unique_id": "octosynk_auto_sync",
+            "command_topic": f"{self.config.mqtt_topic_prefix}/enabled",
+            "state_topic": f"{self.config.mqtt_topic_prefix}/enabled",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:solar-power",
+            "device": device_config,
+        }
+        self.client.publish(
+            f"{base_topic}/switch/{self.config.mqtt_topic_prefix}/auto_sync/config",
+            json.dumps(switch_config),
+            retain=True,
+        )
+
+        # Sensor for last sync time
+        last_sync_config = {
+            "name": "Last Sync",
+            "unique_id": "octosynk_last_sync",
+            "state_topic": f"{self.config.mqtt_topic_prefix}/last_sync",
+            "device_class": "timestamp",
+            "icon": "mdi:clock-check",
+            "device": device_config,
+        }
+        self.client.publish(
+            f"{base_topic}/sensor/{self.config.mqtt_topic_prefix}/last_sync/config",
+            json.dumps(last_sync_config),
+            retain=True,
+        )
+
+        # Sensor for active slots
+        active_slots_config = {
+            "name": "Active Slots",
+            "unique_id": "octosynk_active_slots",
+            "state_topic": f"{self.config.mqtt_topic_prefix}/active_slots",
+            "unit_of_measurement": "slots",
+            "icon": "mdi:calendar-clock",
+            "device": device_config,
+        }
+        self.client.publish(
+            f"{base_topic}/sensor/{self.config.mqtt_topic_prefix}/active_slots/config",
+            json.dumps(active_slots_config),
+            retain=True,
+        )
+
+        # Sensor for next dispatch
+        next_dispatch_config = {
+            "name": "Next Dispatch",
+            "unique_id": "octosynk_next_dispatch",
+            "state_topic": f"{self.config.mqtt_topic_prefix}/next_dispatch",
+            "device_class": "timestamp",
+            "icon": "mdi:clock-start",
+            "device": device_config,
+        }
+        self.client.publish(
+            f"{base_topic}/sensor/{self.config.mqtt_topic_prefix}/next_dispatch/config",
+            json.dumps(next_dispatch_config),
+            retain=True,
+        )
+
+        logger.info("Published Home Assistant discovery configurations")
 
     def is_enabled(self) -> bool:
         """Check if syncing is enabled via MQTT"""
