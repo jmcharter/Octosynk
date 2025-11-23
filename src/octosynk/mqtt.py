@@ -66,6 +66,8 @@ class MQTTClient:
             # Command received from Home Assistant - update state and publish back
             self.enabled_state = payload
             self.publish_state("enabled", payload)
+            # Clear the retained command to avoid processing it again
+            self.client.publish(f"{self.config.mqtt_topic_prefix}/enabled/set", "", retain=True)
             logger.info("Enabled state changed via command", state=payload)
         elif topic == f"{self.config.mqtt_topic_prefix}/enabled":
             # State update (retained message on reconnect)
@@ -93,6 +95,7 @@ class MQTTClient:
             "state_topic": f"{self.config.mqtt_topic_prefix}/enabled",
             "payload_on": "ON",
             "payload_off": "OFF",
+            "ret": True,  # Retain command messages so they persist until processed
             "optimistic": True,  # Update UI immediately without waiting for state confirmation
             "icon": "mdi:solar-power",
             "device": device_config,
