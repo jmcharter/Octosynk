@@ -19,6 +19,7 @@ If you are not comfortable with automated inverter control, do not use this soft
 - Merges dispatches with configured off-peak windows
 - Generates optimized 6-slot charging schedule
 - Updates Sunsynk inverter configuration automatically
+- Optional MQTT integration for Home Assistant control and monitoring
 - Optional healthcheck monitoring via healthchecks.io
 - Docker deployment with automated scheduling
 
@@ -70,6 +71,13 @@ LOG_LEVEL=INFO
 # Healthchecks.io monitoring (optional)
 # Get your UUID from https://healthchecks.io after creating a check
 HEALTHCHECK_UUID=your-healthcheck-uuid-here
+
+# MQTT Configuration (optional - for Home Assistant integration)
+MQTT_BROKER=homeassistant.local  # or IP address of your MQTT broker
+MQTT_PORT=1883                    # default MQTT port
+MQTT_USERNAME=your_mqtt_username  # optional
+MQTT_PASSWORD=your_mqtt_password  # optional
+MQTT_TOPIC_PREFIX=octosynk        # default topic prefix
 ```
 
 ## Finding Your Device IDs
@@ -158,6 +166,69 @@ The application will now run automatically every 5 minutes via the Ofelia schedu
 5. Restart the container: `docker-compose restart octosynk`
 
 You'll now receive alerts via email/SMS if the service stops running.
+
+### Setting Up Home Assistant Integration (Optional)
+
+Octosynk supports MQTT integration for Home Assistant, allowing you to control and monitor the sync process from your smart home dashboard.
+
+#### Prerequisites
+- MQTT broker running (e.g., Mosquitto)
+- Home Assistant connected to the same MQTT broker
+
+#### Configuration Steps
+
+1. Add MQTT configuration to your `.env` file:
+```bash
+MQTT_BROKER=homeassistant.local  # or your broker's IP
+MQTT_PORT=1883
+MQTT_USERNAME=your_mqtt_username  # if authentication is enabled
+MQTT_PASSWORD=your_mqtt_password
+MQTT_TOPIC_PREFIX=octosynk
+```
+
+2. Restart the container:
+```bash
+docker-compose restart octosynk
+```
+
+3. Add the following to your Home Assistant `configuration.yaml`:
+
+```yaml
+mqtt:
+  switch:
+    - name: "Octosynk Auto-Sync"
+      unique_id: octosynk_auto_sync
+      command_topic: "octosynk/enabled"
+      state_topic: "octosynk/enabled"
+      payload_on: "ON"
+      payload_off: "OFF"
+      icon: mdi:solar-power
+
+  sensor:
+    - name: "Octosynk Last Sync"
+      unique_id: octosynk_last_sync
+      state_topic: "octosynk/last_sync"
+      device_class: timestamp
+      icon: mdi:clock-check
+
+    - name: "Octosynk Active Slots"
+      unique_id: octosynk_active_slots
+      state_topic: "octosynk/active_slots"
+      unit_of_measurement: "slots"
+      icon: mdi:calendar-clock
+
+    - name: "Octosynk Next Dispatch"
+      unique_id: octosynk_next_dispatch
+      state_topic: "octosynk/next_dispatch"
+      device_class: timestamp
+      icon: mdi:clock-start
+```
+
+4. Restart Home Assistant or reload the MQTT integration
+
+You'll now have:
+- A switch to enable/disable automatic syncing
+- Sensors showing last sync time, active charging slots, and next dispatch time
 
 ### Managing the Deployment
 

@@ -25,6 +25,11 @@ class Config:
     soc_min: int = 7
     healthcheck_uuid: str | None = None
     log_level: str = "INFO"
+    mqtt_broker: str | None = None
+    mqtt_port: int = 1883
+    mqtt_username: str | None = None
+    mqtt_password: str | None = None
+    mqtt_topic_prefix: str = "octosynk"
 
     @property
     def off_peak_windows(self) -> list[TimeWindow]:

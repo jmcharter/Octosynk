@@ -3,12 +3,14 @@ import logging
 import os
 import sys
 import requests
+import time as time_module
 from octosynk.schedules import Transition, new_schedule
 from octosynk.sunsynk import Client as SunsynkClient
 import structlog
 
 from octosynk.config import Config
 from octosynk import octopus
+from octosynk.mqtt import MQTTClient
 
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -47,6 +49,7 @@ def get_config() -> Config | None:
             raise
 
     try:
+        mqtt_port = os.environ.get("MQTT_PORT", "1883")
         return Config(
             octopus_api_key=get_required_env("OCTOPUS_API_KEY"),
             sunsynk_api_url=get_required_env("SUNSYNK_API_URL", "https://api.sunsynk.net/api/v1/"),
@@ -60,6 +63,11 @@ def get_config() -> Config | None:
             off_peak_end_time=get_time_env("OFF_PEAK_END_TIME", "05:30"),
             healthcheck_uuid=get_required_env("HEALTHCHECK_UUID", None),
             log_level=get_required_env("LOG_LEVEL", "INFO"),
+            mqtt_broker=os.environ.get("MQTT_BROKER"),
+            mqtt_port=int(mqtt_port),
+            mqtt_username=os.environ.get("MQTT_USERNAME"),
+            mqtt_password=os.environ.get("MQTT_PASSWORD"),
+            mqtt_topic_prefix=os.environ.get("MQTT_TOPIC_PREFIX", "octosynk"),
         )
     except ValueError:
         return None
@@ -92,6 +100,18 @@ def run():
         )
     )
 
+    # Initialize MQTT client
+    mqtt_client = MQTTClient(config)
+
+    # Wait a moment for MQTT to connect and receive initial state
+    time_module.sleep(2)
+
+    # Check if syncing is enabled
+    if not mqtt_client.is_enabled():
+        logger.info("Syncing is disabled via MQTT, skipping run")
+        mqtt_client.disconnect()
+        return
+
     ping_healthcheck(config.healthcheck_uuid, "/start")
 
     try:
@@ -104,11 +124,19 @@ def run():
         dispatches = octopus.merge_dispatches(dispatches)
         dispatches = octopus.trim_dispatches(dispatches, config.off_peak_windows)
 
+        # Publish next dispatch if available
+        if dispatches:
+            next_dispatch = min(dispatches, key=lambda d: d.start_datetime_utc)
+            mqtt_client.publish_next_dispatch(next_dispatch.start_datetime_utc.isoformat())
+
         # Generate schedule from dispatches
         dispatch_transitions = dispatches_to_transitions(dispatches)
         schedule = new_schedule(config, dispatch_transitions)
         active_slots = sum(1 for i in range(1, 7) if getattr(schedule, f"slot_{i}").charge)
         logger.info("Generated schedule", active_slots=active_slots)
+
+        # Publish active slots count
+        mqtt_client.publish_active_slots(active_slots)
 
         # Update Sunsynk inverter
         from octosynk.sunsynk import schedule_to_inverter_write
@@ -119,6 +147,7 @@ def run():
 
         if res.status_code == 200:
             logger.info("Successfully updated inverter schedule")
+            mqtt_client.publish_last_sync()
         else:
             logger.warning("Unexpected response from inverter", status=res.status_code)
 
@@ -127,7 +156,10 @@ def run():
     except Exception as e:
         logger.exception("Octosynk run failed")
         ping_healthcheck(config.healthcheck_uuid, "/fail")
+        mqtt_client.disconnect()
         sys.exit(1)
+
+    mqtt_client.disconnect()
 
 
 if __name__ == "__main__":
