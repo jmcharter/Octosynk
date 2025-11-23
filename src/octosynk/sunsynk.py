@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import time
+from enum import IntEnum
 from typing import Any, Literal
 from urllib.parse import urljoin
 
@@ -11,6 +12,12 @@ from octosynk.auth import Authenticator, SunsynkAPIError, RetryableSunsynkError
 from octosynk.config import Config
 
 logger = structlog.stdlib.get_logger(__name__)
+
+
+class SysWorkMode(IntEnum):
+    SellingFirst = 0
+    ZeroExportLimitLoad = 1
+    LimitedToHome = 2
 
 
 @dataclass
@@ -55,12 +62,14 @@ class SunsynkInverterRead:
     """Complete inverter charge configuration"""
 
     charge_slots: list[InverterChargeSlot]
+    system_work_mode: SysWorkMode = field(default=SysWorkMode.LimitedToHome)
 
     @classmethod
     def from_dict(cls, data: dict) -> "SunsynkInverterRead":
         """Create from API response"""
         slots = [InverterChargeSlot.from_dict(i, data) for i in range(1, 7)]
-        return cls(charge_slots=slots)
+        system_work_mode = SysWorkMode(int(data.get("sysWorkMode", SysWorkMode.LimitedToHome)))
+        return cls(charge_slots=slots, system_work_mode=system_work_mode)
 
     @property
     def active_slots(self) -> list[InverterChargeSlot]:
@@ -85,6 +94,7 @@ class SunsynkInverterWrite:
     """Complete inverter charge configuration for writing to API"""
 
     charge_slots: list[InverterChargeSlot]
+    system_work_mode: SysWorkMode = field(default=SysWorkMode.LimitedToHome)
 
     def __post_init__(self):
         """Validate the configuration"""
@@ -100,11 +110,16 @@ class SunsynkInverterWrite:
     @classmethod
     def from_read(cls, read_config: SunsynkInverterRead) -> "SunsynkInverterWrite":
         """Create a write config from a read config"""
-        return cls(charge_slots=read_config.charge_slots.copy())
+        return cls(
+            charge_slots=read_config.charge_slots.copy(),
+            system_work_mode=read_config.system_work_mode,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to API format (camelCase) for writing"""
-        result = {}
+        result = {
+            "sysWorkMode": str(self.system_work_mode.value),
+        }
 
         if self.charge_slots is not None:
             for i, slot in enumerate(self.charge_slots, 1):
@@ -155,7 +170,6 @@ def create_charge_config(
 
 def schedule_to_inverter_write(schedule: "Schedule") -> SunsynkInverterWrite:
     """Convert a Schedule to a SunsynkInverterWrite configuration"""
-    from octosynk.schedules import Schedule
 
     charge_slots = [
         InverterChargeSlot(
