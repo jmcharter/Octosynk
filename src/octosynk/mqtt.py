@@ -43,11 +43,13 @@ class MQTTClient:
             # Publish Home Assistant discovery configs
             self._publish_discovery_configs()
 
-            # Subscribe to the enabled state topic
+            # Subscribe to both state and command topics
             # Any retained message will arrive immediately in _on_message
-            enabled_topic = f"{self.config.mqtt_topic_prefix}/enabled"
-            client.subscribe(enabled_topic)
-            logger.debug("Subscribed to topic", topic=enabled_topic)
+            state_topic = f"{self.config.mqtt_topic_prefix}/enabled"
+            command_topic = f"{self.config.mqtt_topic_prefix}/enabled/set"
+            client.subscribe(state_topic)
+            client.subscribe(command_topic)
+            logger.debug("Subscribed to topics", state_topic=state_topic, command_topic=command_topic)
         else:
             logger.error("MQTT connection failed", return_code=rc)
 
@@ -56,7 +58,13 @@ class MQTTClient:
         topic = msg.topic
         payload = msg.payload.decode()
 
-        if topic == f"{self.config.mqtt_topic_prefix}/enabled":
+        if topic == f"{self.config.mqtt_topic_prefix}/enabled/set":
+            # Command received from Home Assistant - update state and publish back
+            self.enabled_state = payload
+            self.publish_state("enabled", payload)
+            logger.info("Enabled state changed via command", state=payload)
+        elif topic == f"{self.config.mqtt_topic_prefix}/enabled":
+            # State update (retained message on reconnect)
             self.enabled_state = payload
             logger.info("Enabled state updated", state=payload)
 
@@ -77,10 +85,12 @@ class MQTTClient:
         switch_config = {
             "name": "Auto-Sync",
             "unique_id": "octosynk_auto_sync",
-            "command_topic": f"{self.config.mqtt_topic_prefix}/enabled",
+            "command_topic": f"{self.config.mqtt_topic_prefix}/enabled/set",
             "state_topic": f"{self.config.mqtt_topic_prefix}/enabled",
             "payload_on": "ON",
             "payload_off": "OFF",
+            "retain": True,
+            "optimistic": False,
             "icon": "mdi:solar-power",
             "device": device_config,
         }
