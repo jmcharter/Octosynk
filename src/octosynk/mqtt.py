@@ -11,7 +11,7 @@ class MQTTClient:
     def __init__(self, config: Config):
         self.config = config
         self.client = None
-        self.enabled_state = "ON"  # Default to enabled if MQTT not configured
+        self.enabled_state = None  # Will be set from retained message or default to ON
 
         if not config.mqtt_broker:
             logger.debug("MQTT not configured, running in standalone mode")
@@ -44,12 +44,10 @@ class MQTTClient:
             self._publish_discovery_configs()
 
             # Subscribe to the enabled state topic
+            # Any retained message will arrive immediately in _on_message
             enabled_topic = f"{self.config.mqtt_topic_prefix}/enabled"
             client.subscribe(enabled_topic)
             logger.debug("Subscribed to topic", topic=enabled_topic)
-
-            # Publish initial state
-            self.publish_state("enabled", self.enabled_state)
         else:
             logger.error("MQTT connection failed", return_code=rc)
 
@@ -140,9 +138,20 @@ class MQTTClient:
         logger.info("Published Home Assistant discovery configurations")
 
     def is_enabled(self) -> bool:
-        """Check if syncing is enabled via MQTT"""
+        """Check if syncing is enabled via MQTT
+
+        Returns True if enabled. On first run (no retained state),
+        defaults to ON and publishes it as retained.
+        """
         if not self.client:
             # MQTT not configured, always enabled
+            return True
+
+        # If no state received from MQTT (first run), default to ON
+        if self.enabled_state is None:
+            logger.info("No existing state found, defaulting to enabled")
+            self.publish_state("enabled", "ON")
+            self.enabled_state = "ON"
             return True
 
         return self.enabled_state == "ON"
