@@ -58,12 +58,14 @@ class MQTTClient:
         topic = msg.topic
         payload = msg.payload.decode()
 
+        # Ignore empty messages (used to clear retained messages)
+        if not payload:
+            return
+
         if topic == f"{self.config.mqtt_topic_prefix}/enabled/set":
             # Command received from Home Assistant - update state and publish back
             self.enabled_state = payload
             self.publish_state("enabled", payload)
-            # Clear the command topic to avoid processing same command twice
-            self.client.publish(f"{self.config.mqtt_topic_prefix}/enabled/set", "", retain=False)
             logger.info("Enabled state changed via command", state=payload)
         elif topic == f"{self.config.mqtt_topic_prefix}/enabled":
             # State update (retained message on reconnect)
