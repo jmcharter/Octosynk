@@ -162,7 +162,13 @@ class Authenticator:
             raise RetryableSunsynkError(f"Network error during auth: {e}") from e
 
         data = response.json()
-        auth_data = data.get("data", {})
+
+        # Check for success based on 'success' field in the response
+        if not data.get("success", False):
+            logger.error("Authentication failed", response=data)
+            raise AuthenticationError(f"Authentication failed: {data.get('msg', 'Unknown error')}")
+
+        auth_data = data.get("data") or {}
         if "access_token" not in auth_data:
             raise SunsynkAPIError(f"Unexpected auth response: {data}")
 
