@@ -33,10 +33,25 @@ class Authenticator:
         self._timeout = timeout
         self._access_token = None
         self._public_key_cache = None
+        self._raw_public_key_cache = None  # Store raw key before PEM formatting
 
     def _sign_public_key_request(self, nonce: int, source: str = "sunsynk") -> str:
         """Sign the public key request using the known salt."""
         payload = f"nonce={nonce}&source={source}POWER_VIEW"
+        return hashlib.md5(payload.encode()).hexdigest()
+
+    def _sign_auth_request(self, nonce: int, public_key_prefix: str, source: str = "sunsynk") -> str:
+        """Sign the authentication request using the public key prefix.
+
+        Args:
+            nonce: Timestamp in milliseconds
+            public_key_prefix: First 10 characters of the public key
+            source: Source identifier (default: "sunsynk")
+
+        Returns:
+            MD5 hash of "nonce={nonce}&source={source}{public_key_prefix}"
+        """
+        payload = f"nonce={nonce}&source={source}{public_key_prefix}"
         return hashlib.md5(payload.encode()).hexdigest()
 
     @retry(
@@ -64,15 +79,19 @@ class Authenticator:
             if not data.get("success", False):
                 raise SunsynkAPIError(f"Failed to fetch public key: {data}")
 
-            public_key_pem = data.get("data")
-            if not public_key_pem:
+            raw_public_key = data.get("data")
+            if not raw_public_key:
                 raise SunsynkAPIError(f"Public key not found in response: {data}")
 
+            # Store the raw key before formatting (needed for signing)
+            self._raw_public_key_cache = raw_public_key
+
             # Wrap the key in proper PEM format if it's just the base64 part
+            public_key_pem = raw_public_key
             if not public_key_pem.startswith("-----BEGIN PUBLIC KEY-----"):
                 public_key_pem = f"-----BEGIN PUBLIC KEY-----\n{public_key_pem}\n-----END PUBLIC KEY-----"
 
-            # Cache the key for subsequent requests
+            # Cache the formatted key for subsequent requests
             self._public_key_cache = public_key_pem
             return public_key_pem
 
@@ -118,14 +137,45 @@ class Authenticator:
     )
     def authenticate(self) -> str:
         """Authenticate and return access token."""
-        encrypted_password = self._encrypt_password(self.password)
+        # Fetch the public key first
+        public_key_pem = self._fetch_public_key()
+
+        # Encrypt the password using the public key
+        public_key = serialization.load_pem_public_key(
+            public_key_pem.encode(),
+            backend=default_backend(),
+        )
+        if not isinstance(public_key, rsa.RSAPublicKey):
+            raise SunsynkAPIError(f"Expected RSA public key, got {type(public_key).__name__}")
+
+        encrypted = public_key.encrypt(
+            self.password.encode("utf-8"),
+            padding.PKCS1v15(),
+        )
+        encrypted_password = base64.b64encode(encrypted).decode("utf-8")
+
+        # Generate nonce and signature for the authentication request
+        # The sign uses the first 10 characters of the RAW public key (before PEM formatting)!
+        nonce = int(time.time() * 1000)  # milliseconds
+        source = "sunsynk"
+        public_key_prefix = self._raw_public_key_cache[:10]  # First 10 characters of raw key
+        sign = self._sign_auth_request(nonce, public_key_prefix, source)
+
+        logger.debug(
+            "Auth request details",
+            nonce=nonce,
+            public_key_prefix=public_key_prefix,
+            sign=sign,
+        )
 
         payload = {
+            "sign": sign,
+            "nonce": nonce,
             "username": self.username,
             "password": encrypted_password,
             "grant_type": "password",
             "client_id": "csp-web",
-            "source": "sunsynk",
+            "source": source,
         }
 
         headers = {
