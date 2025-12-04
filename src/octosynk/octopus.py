@@ -70,31 +70,61 @@ def trim_dispatches(dispatches: list[Dispatch], off_peak_windows: list[TimeWindo
     if not dispatches:
         return []
 
+    from datetime import time as time_class
+
     trimmed = []
     for dispatch in dispatches:
         start_time = dispatch.start_datetime_utc.time()
         end_time = dispatch.end_datetime_utc.time()
 
+        # Determine if dispatch crosses midnight
+        dispatch_crosses_midnight = start_time > end_time
+
         # Check if dispatch is entirely within any off-peak window
         entirely_within = False
-        for window in off_peak_windows:
-            if start_time >= window.start and end_time <= window.end:
-                entirely_within = True
-                break
+
+        if dispatch_crosses_midnight:
+            # For a midnight-crossing dispatch to be entirely within off-peak windows,
+            # both the before-midnight and after-midnight portions must be covered by windows
+            before_midnight_covered = False
+            after_midnight_covered = False
+
+            for window in off_peak_windows:
+                # Check if this window covers from start_time to midnight
+                # Window like TimeWindow(23:30, 00:00) with end=00:00 means "to midnight"
+                # So we check: window.start <= start_time AND window.end == 00:00
+                if window.start <= start_time and window.end == time_class(0, 0):
+                    before_midnight_covered = True
+
+                # Check if this window covers from midnight to end_time
+                # This requires: window.start == 00:00 AND window.end >= end_time
+                if window.start == time_class(0, 0) and window.end >= end_time:
+                    after_midnight_covered = True
+
+            entirely_within = before_midnight_covered and after_midnight_covered
+        else:
+            # Dispatch doesn't cross midnight - use simple time comparison
+            for window in off_peak_windows:
+                if start_time >= window.start and end_time <= window.end:
+                    entirely_within = True
+                    break
 
         if entirely_within:
             continue  # Skip this dispatch - it's redundant
 
         # Check if dispatch needs trimming at the start
         new_start = dispatch.start_datetime_utc
-        for window in off_peak_windows:
-            # If dispatch starts during off-peak but ends after it
-            if start_time >= window.start and start_time < window.end and end_time > window.end:
-                # Trim start to window end
-                new_start = dispatch.start_datetime_utc.replace(
-                    hour=window.end.hour, minute=window.end.minute, second=0, microsecond=0
-                )
-                break
+        if not dispatch_crosses_midnight:
+            # Only apply trimming logic for non-midnight-crossing dispatches
+            # (midnight-crossing dispatch trimming would require more complex logic)
+            for window in off_peak_windows:
+                # If dispatch starts during off-peak but ends after it
+                if start_time >= window.start and start_time < window.end and end_time > window.end:
+                    # Trim start to window end
+                    new_start = dispatch.start_datetime_utc.replace(
+                        hour=window.end.hour, minute=window.end.minute, second=0, microsecond=0
+                    )
+                    break
 
         if new_start < dispatch.end_datetime_utc:
             trimmed.append(Dispatch(new_start, dispatch.end_datetime_utc))
